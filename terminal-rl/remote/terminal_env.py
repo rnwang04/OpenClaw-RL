@@ -27,11 +27,6 @@ def _stop_terminal_compat(terminal: Terminal, timeout: float) -> None:
     try:
         terminal.stop(timeout=timeout)
     except TypeError as exc:
-        if "unexpected keyword argument 'timeout'" not in str(exc):
-            raise
-        logger.warning(
-            "Terminal.stop(timeout=...) is unsupported; retrying with Terminal.stop()."
-        )
         terminal.stop()
 
 

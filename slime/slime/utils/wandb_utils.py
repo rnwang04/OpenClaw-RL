@@ -19,10 +19,44 @@ def _is_offline_mode(args) -> bool:
     return os.environ.get("WANDB_MODE") == "offline"
 
 
+def _maybe_enable_swanlab_sync(args, is_primary: bool) -> None:
+    """Hook SwanLab onto subsequent wandb.init/log calls.
+
+    Only enabled on the primary rank: secondary ranks would otherwise create
+    one extra SwanLab experiment per rank, reproducing the very fragmentation
+    we are trying to escape.
+    """
+    if not getattr(args, "use_swanlab_sync", False):
+        return
+    if not is_primary:
+        return
+
+    try:
+        import swanlab
+    except ImportError:
+        logger.warning("--use-swanlab-sync is set but `swanlab` is not installed; skipping.")
+        return
+
+    mode = getattr(args, "swanlab_mode", None) or "local"
+    os.environ.setdefault("SWANLAB_MODE", mode)
+
+    logdir = getattr(args, "swanlab_logdir", None)
+    if logdir:
+        os.makedirs(logdir, exist_ok=True)
+        os.environ.setdefault("SWANLAB_LOG_DIR", logdir)
+
+    swanlab.sync_wandb()
+    logger.info(
+        f"SwanLab sync_wandb enabled (mode={mode}, logdir={logdir or 'default ./swanlog'})."
+    )
+
+
 def init_wandb_primary(args):
     if not args.use_wandb:
         args.wandb_run_id = None
         return
+
+    _maybe_enable_swanlab_sync(args, is_primary=True)
 
     # Set W&B mode if specified (overrides WANDB_MODE env var)
     if args.wandb_mode:
@@ -96,6 +130,8 @@ def init_wandb_secondary(args, router_addr=None):
     wandb_run_id = getattr(args, "wandb_run_id", None)
     if wandb_run_id is None:
         return
+
+    _maybe_enable_swanlab_sync(args, is_primary=False)
 
     # Set W&B mode if specified (same as primary)
     if args.wandb_mode:

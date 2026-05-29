@@ -1179,6 +1179,33 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Whether to turn on passrate logging, which will log the pass@n of the responses in the rollout.",
             )
             parser.add_argument("--wandb-run-id", type=str, default=None)
+
+            # SwanLab sync (optional): mirror wandb.log into a local SwanLab
+            # experiment. Useful when wandb has to run in offline mode and its
+            # per-rank dirs cause split / missing metrics after sync.
+            parser.add_argument(
+                "--use-swanlab-sync",
+                action="store_true",
+                default=False,
+                help=(
+                    "Enable swanlab.sync_wandb() on the primary rank so every "
+                    "wandb.log call is also recorded into a local SwanLab "
+                    "experiment. View with `swanlab watch <logdir>`."
+                ),
+            )
+            parser.add_argument(
+                "--swanlab-mode",
+                type=str,
+                default="local",
+                choices=["local", "cloud", "disabled"],
+                help="SwanLab mode when --use-swanlab-sync is set. Default: local (offline).",
+            )
+            parser.add_argument(
+                "--swanlab-logdir",
+                type=str,
+                default=None,
+                help="Directory where SwanLab writes its local experiment files. Default: ./swanlog.",
+            )
             return parser
 
         # tensorboard

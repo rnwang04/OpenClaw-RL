@@ -73,5 +73,6 @@ def rollout_log(rollout_id, args, samples, rollout_extra_metrics, rollout_time):
     log_dict["rollout/step"] = step
     _ensure_terminal_step_metric(args)
     logging_utils.log(args, log_dict, step_key="rollout/step")
+    logger.info("rollout %s metrics: %s", rollout_id, log_dict)
 
     return False

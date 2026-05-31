@@ -21,7 +21,7 @@ export REPO_ROOT
 export SLIME_DIR="${REPO_ROOT}/slime"
 export MEGATRON_DIR="${MEGATRON_DIR:-${REPO_ROOT}/Megatron-LM}"
 
-source "${SLIME_DIR}/scripts/models/qwen3-8B.sh"
+source "${SLIME_DIR}/scripts/models/qwen3-4B.sh"
 
 # Paths: set/export before running (no built-in defaults).
 HF_HOME="${HF_HOME:-}"

@@ -19,6 +19,9 @@ if [ -d "${REPO_ROOT}/.venv" ]; then
   source .venv/bin/activate
 fi
 
+docker network prune -f
+docker container prune -f
+
 # Start the pool server
 exec python -m terminal-rl.remote.pool_server \
   --host 0.0.0.0 \

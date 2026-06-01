@@ -64,7 +64,7 @@ CKPT_ARGS=(
   --ref-load "${REF_LOAD}"
   --load "${RESUME_LOAD}"
   --save "${SAVE_CKPT}"
-  --save-interval 8
+  --save-interval 10
   --rotary-base 1000000
 )
 
@@ -140,6 +140,17 @@ if [[ -n "${WANDB_KEY:-}" ]]; then
   )
 else
   WANDB_ARGS=()
+fi
+
+TB_ARGS=()
+if [[ -n "${TENSORBOARD_DIR:-}" ]]; then
+  export TENSORBOARD_DIR
+  TB_ARGS=(
+    --use-tensorboard
+    --tb-project-name "${TB_PROJECT_NAME:-openclaw-rl-terminal}"
+    --tb-experiment-name "${TB_EXPERIMENT_NAME:-$(date +%Y%m%d_%H%M%S)}"
+  )
+  log "TensorBoard enabled, writing to TENSORBOARD_DIR=${TENSORBOARD_DIR}"
 fi
 
 SGLANG_ARGS=(
@@ -277,6 +288,7 @@ env_vars = {
   "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF",""),
   "USE_REMOTE_ENV": os.environ.get("USE_REMOTE_ENV","0"),
   "ENV_SERVER_URL": os.environ.get("ENV_SERVER_URL",""),
+  "TENSORBOARD_DIR": os.environ.get("TENSORBOARD_DIR",""),
 }
 print(json.dumps({"env_vars": env_vars}))
 PY
@@ -299,6 +311,7 @@ submit_job() {
     "${OPTIMIZER_ARGS[@]}" \
     "${GRPO_ARGS[@]}" \
     "${WANDB_ARGS[@]}" \
+    "${TB_ARGS[@]}" \
     "${PERF_ARGS[@]}" \
     "${EVAL_ARGS[@]}" \
     "${SGLANG_ARGS[@]}" \

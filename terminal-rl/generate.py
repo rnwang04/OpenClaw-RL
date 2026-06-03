@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List
@@ -70,6 +71,51 @@ def _log_stage_exception(
     )
 
 
+def _build_timings(
+    *,
+    t_start: float,
+    env_client_create_time: float,
+    runner_run_episode_time: float,
+    env_client: Any,
+    runner: Any,
+) -> Dict[str, float]:
+    """Combine the per-sample timing accumulators into a single dict that
+    gets stashed in sample.metadata["_perf"] and aggregated later in
+    rollout_log.py. env.close is intentionally NOT included: it runs inside
+    a `finally` after this dict is attached to the sample (close is
+    typically fast — HTTP DELETE / lease release)."""
+    total = time.perf_counter() - t_start
+    env_t = env_client.timings if env_client is not None else {}
+    timings: Dict[str, float] = {
+        "total": total,
+        "env_client_create": env_client_create_time,
+        "env_allocate": env_t.get("allocate", 0.0),
+        "env_reset": env_t.get("reset", 0.0),
+        "env_evaluate": env_t.get("evaluate", 0.0),
+        "env_heartbeat": env_t.get("heartbeat", 0.0),
+        "runner_run_episode": runner_run_episode_time,
+        "sglang_generate": getattr(runner, "sglang_generate_time", 0.0),
+        "tool_exec": getattr(runner, "tool_exec_time", 0.0),
+        "sglang_turn_count": float(getattr(runner, "sglang_turn_count", 0)),
+        "tool_call_count": float(getattr(runner, "tool_call_count", 0)),
+    }
+    # Derived: time inside runner.run_episode NOT accounted for by sglang or
+    # tool_exec — context-build / parsing / PRM dispatch / asyncio overhead.
+    timings["runner_other"] = max(
+        0.0,
+        timings["runner_run_episode"]
+        - timings["sglang_generate"]
+        - timings["tool_exec"],
+    )
+    return timings
+
+
+def _attach_perf(sample: Any, timings: Dict[str, float]) -> None:
+    if sample.metadata is None:
+        sample.metadata = {}
+    sample.metadata["_perf"] = timings
+
+
 async def generate(
     args,
     sample: Sample,
@@ -98,11 +144,17 @@ async def generate(
     outcome = None
     rollout_error: str | None = None
 
+    t_start = time.perf_counter()
+    env_client_create_time = 0.0
+    runner_run_episode_time = 0.0
+
     try:
         task_name = task_meta["task_name"]
         stage = "env_client.create"
         try:
+            _t = time.perf_counter()
             env_client = create_env_client()
+            env_client_create_time = time.perf_counter() - _t
 
             stage = "env.allocate"
             lease = await env_client.allocate(
@@ -160,12 +212,15 @@ async def generate(
             rollout_error = _format_exception(exc)
 
         if runner is not None:
+            _t = time.perf_counter()
             try:
                 stage = "runner.run_episode"
                 outcome = await runner.run_episode(user_msg)
             except Exception as exc:
                 _log_stage_exception(log_tag, stage, exc)
                 rollout_error = _format_exception(exc)
+            finally:
+                runner_run_episode_time = time.perf_counter() - _t
 
         reward = 0.0
         eval_error: str | None = None
@@ -183,6 +238,16 @@ async def generate(
                 )
 
         stage = "sample.build"
+        _attach_perf(
+            sample,
+            _build_timings(
+                t_start=t_start,
+                env_client_create_time=env_client_create_time,
+                runner_run_episode_time=runner_run_episode_time,
+                env_client=env_client,
+                runner=runner,
+            ),
+        )
         try:
             return build_samples_from_outcome(
                 sample,

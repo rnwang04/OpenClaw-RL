@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 from slime.utils.http_utils import post
 
 logger = logging.getLogger(__name__)
+
+_TIMED_OPS = ("allocate", "heartbeat", "reset", "exec_tool", "evaluate", "close")
 
 
 def create_env_client() -> TerminalEnvClient:
@@ -26,27 +29,41 @@ class TerminalEnvClient:
         self.evaluate_max_retries = int(os.getenv("ENV_EVALUATE_MAX_RETRIES", "1"))
         self.close_max_retries = int(os.getenv("ENV_CLOSE_MAX_RETRIES", "3"))
         self.exec_tool_max_retries = int(os.getenv("ENV_EXEC_TOOL_MAX_RETRIES", "3"))
+        # Per-instance perf accumulators. One TerminalEnvClient is created per
+        # sample (see generate.py), so these are naturally per-sample.
+        self.timings: dict[str, float] = {op: 0.0 for op in _TIMED_OPS}
+        self.call_counts: dict[str, int] = {op: 0 for op in _TIMED_OPS}
 
     async def allocate(
         self,
         task_key: str,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        out = await post(
-            f"{self.base_url}/allocate",
-            {"task_key": task_key, "request_id": request_id},
-            max_retries=self.allocate_max_retries,
-        )
+        t0 = time.perf_counter()
+        try:
+            out = await post(
+                f"{self.base_url}/allocate",
+                {"task_key": task_key, "request_id": request_id},
+                max_retries=self.allocate_max_retries,
+            )
+        finally:
+            self.timings["allocate"] += time.perf_counter() - t0
+            self.call_counts["allocate"] += 1
         if not out.get("ok", False):
             raise RuntimeError(f"allocate failed: {out}")
         return out
 
     async def heartbeat(self, lease_id: str) -> None:
-        out = await post(
-            f"{self.base_url}/heartbeat",
-            {"lease_id": lease_id},
-            max_retries=self.default_max_retries,
-        )
+        t0 = time.perf_counter()
+        try:
+            out = await post(
+                f"{self.base_url}/heartbeat",
+                {"lease_id": lease_id},
+                max_retries=self.default_max_retries,
+            )
+        finally:
+            self.timings["heartbeat"] += time.perf_counter() - t0
+            self.call_counts["heartbeat"] += 1
         if not out.get("ok", False):
             raise RuntimeError(f"heartbeat failed: {out}")
 
@@ -57,16 +74,21 @@ class TerminalEnvClient:
         run_ctx: dict[str, Any],
         task_timeouts: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        out = await post(
-            f"{self.base_url}/reset",
-            {
-                "lease_id": lease_id,
-                "task_meta": task_meta,
-                "run_ctx": run_ctx,
-                "task_timeouts": task_timeouts,
-            },
-            max_retries=self.default_max_retries,
-        )
+        t0 = time.perf_counter()
+        try:
+            out = await post(
+                f"{self.base_url}/reset",
+                {
+                    "lease_id": lease_id,
+                    "task_meta": task_meta,
+                    "run_ctx": run_ctx,
+                    "task_timeouts": task_timeouts,
+                },
+                max_retries=self.default_max_retries,
+            )
+        finally:
+            self.timings["reset"] += time.perf_counter() - t0
+            self.call_counts["reset"] += 1
         if not out.get("ok", False):
             raise RuntimeError(f"reset failed: {out}")
         return out
@@ -74,51 +96,66 @@ class TerminalEnvClient:
     async def exec_tool(
         self, lease_id: str, tool_name: str, arguments: dict[str, Any]
     ) -> str:
-        out = await post(
-            f"{self.base_url}/exec_tool",
-            {
-                "lease_id": lease_id,
-                "tool_call": {"name": tool_name, "arguments": arguments},
-            },
-            max_retries=self.exec_tool_max_retries,
-        )
+        t0 = time.perf_counter()
+        try:
+            out = await post(
+                f"{self.base_url}/exec_tool",
+                {
+                    "lease_id": lease_id,
+                    "tool_call": {"name": tool_name, "arguments": arguments},
+                },
+                max_retries=self.exec_tool_max_retries,
+            )
+        finally:
+            self.timings["exec_tool"] += time.perf_counter() - t0
+            self.call_counts["exec_tool"] += 1
         if not out.get("ok", False):
             raise RuntimeError(f"exec_tool failed: {out}")
         return str(out.get("observation", ""))
 
     async def evaluate(self, lease_id: str) -> float:
-        out = await post(
-            f"{self.base_url}/evaluate",
-            {"lease_id": lease_id},
-            max_retries=self.evaluate_max_retries,
-        )
+        t0 = time.perf_counter()
+        try:
+            out = await post(
+                f"{self.base_url}/evaluate",
+                {"lease_id": lease_id},
+                max_retries=self.evaluate_max_retries,
+            )
+        finally:
+            self.timings["evaluate"] += time.perf_counter() - t0
+            self.call_counts["evaluate"] += 1
         if not out.get("ok", False):
             raise RuntimeError(f"evaluate failed: {out}")
         return float(out.get("score", 0.0))
 
     async def close(self, lease_id: str) -> None:
+        t0 = time.perf_counter()
         try:
-            out = await post(
-                f"{self.base_url}/close",
-                {"lease_id": lease_id},
-                max_retries=self.close_max_retries,
-            )
-        except Exception as exc:
-            error_str = str(exc)
-            resp_text = ""
-            if hasattr(exc, "response"):
-                try:
-                    resp_text = exc.response.text
-                except Exception:
-                    pass
-            combined = f"{error_str} {resp_text}"
-            if "Unknown run_lease_id" in combined or "Unknown lease" in combined:
-                logger.debug("close(%s): lease already gone, nothing to do.", lease_id)
-                return
-            raise
-        if not out.get("ok", False):
-            error_msg = str(out.get("error", ""))
-            if "Unknown" in error_msg and "lease" in error_msg.lower():
-                logger.debug("close(%s): lease already gone, nothing to do.", lease_id)
-                return
-            raise RuntimeError(f"close failed: {out}")
+            try:
+                out = await post(
+                    f"{self.base_url}/close",
+                    {"lease_id": lease_id},
+                    max_retries=self.close_max_retries,
+                )
+            except Exception as exc:
+                error_str = str(exc)
+                resp_text = ""
+                if hasattr(exc, "response"):
+                    try:
+                        resp_text = exc.response.text
+                    except Exception:
+                        pass
+                combined = f"{error_str} {resp_text}"
+                if "Unknown run_lease_id" in combined or "Unknown lease" in combined:
+                    logger.debug("close(%s): lease already gone, nothing to do.", lease_id)
+                    return
+                raise
+            if not out.get("ok", False):
+                error_msg = str(out.get("error", ""))
+                if "Unknown" in error_msg and "lease" in error_msg.lower():
+                    logger.debug("close(%s): lease already gone, nothing to do.", lease_id)
+                    return
+                raise RuntimeError(f"close failed: {out}")
+        finally:
+            self.timings["close"] += time.perf_counter() - t0
+            self.call_counts["close"] += 1

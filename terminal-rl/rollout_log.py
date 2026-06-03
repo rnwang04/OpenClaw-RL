@@ -20,6 +20,68 @@ def _ensure_terminal_step_metric(args) -> None:
         logger.warning("Failed to define wandb step metric for terminal/*: %s", e)
 
 
+def _percentile(sorted_xs: List[float], q: float) -> float:
+    n = len(sorted_xs)
+    if n == 0:
+        return float("nan")
+    if n == 1:
+        return sorted_xs[0]
+    k = (n - 1) * q
+    f = int(k)
+    c = min(f + 1, n - 1)
+    return sorted_xs[f] + (sorted_xs[c] - sorted_xs[f]) * (k - f)
+
+
+def _aggregate_timings(samples) -> Dict[str, float]:
+    """Aggregate per-sample `_perf` dicts attached by generate.py into mean /
+    p50 / p95 / max distributions. Dedups by (group_index, index) because
+    build_samples_from_outcome emits one Sample per turn, all sharing the
+    same per-episode timing dict.
+    """
+    seen = set()
+    perfs: List[Dict[str, float]] = []
+    for s in samples:
+        key = (getattr(s, "group_index", None), getattr(s, "index", None))
+        if key in seen:
+            continue
+        seen.add(key)
+        md = getattr(s, "metadata", None) or {}
+        perf = md.get("_perf")
+        if isinstance(perf, dict):
+            perfs.append(perf)
+    if not perfs:
+        return {}
+
+    keys = set()
+    for p in perfs:
+        keys.update(p.keys())
+
+    out: Dict[str, float] = {}
+    out["terminal/timing/n_samples"] = len(perfs)
+    for k in sorted(keys):
+        vals = [float(p[k]) for p in perfs if isinstance(p.get(k), (int, float))]
+        if not vals:
+            continue
+        vals_sorted = sorted(vals)
+        prefix = f"terminal/timing/{k}"
+        out[f"{prefix}/mean"] = sum(vals) / len(vals)
+        out[f"{prefix}/p50"] = _percentile(vals_sorted, 0.50)
+        out[f"{prefix}/p95"] = _percentile(vals_sorted, 0.95)
+        out[f"{prefix}/max"] = vals_sorted[-1]
+
+    # Per-sample sglang share of total (avoids ratio-of-means bias).
+    shares = []
+    for p in perfs:
+        total = p.get("total")
+        sg = p.get("sglang_generate")
+        if isinstance(total, (int, float)) and total > 0 and isinstance(sg, (int, float)):
+            shares.append(sg / total)
+    if shares:
+        out["terminal/timing/sglang_share/mean"] = sum(shares) / len(shares)
+        out["terminal/timing/sglang_share/p50"] = _percentile(sorted(shares), 0.50)
+    return out
+
+
 def rollout_log(rollout_id, args, samples, rollout_extra_metrics, rollout_time):
 
     trainable = [s for s in samples if not getattr(s, "remove_sample", False)]
@@ -68,6 +130,8 @@ def rollout_log(rollout_id, args, samples, rollout_extra_metrics, rollout_time):
             )
 
     log_dict["terminal/rollout_time"] = rollout_time
+
+    log_dict.update(_aggregate_timings(samples))
 
     step = compute_rollout_step(args, rollout_id)
     log_dict["rollout/step"] = step

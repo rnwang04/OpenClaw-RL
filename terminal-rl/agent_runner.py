@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List
 
 from rollout_agent import PRMAgent, RolloutAgent
@@ -33,6 +34,12 @@ class AgentRunner:
         self._max_parse_errors = max_parse_errors
         self._log_tag = log_tag
         self._model_turn_count = 0
+        # Per-runner perf accumulators. AgentRunner is created per sample
+        # (see generate.py), so these are naturally per-sample.
+        self.sglang_generate_time: float = 0.0
+        self.sglang_turn_count: int = 0
+        self.tool_exec_time: float = 0.0
+        self.tool_call_count: int = 0
 
     def _reset(self, input_message: Any) -> None:
         self._model_turn_count = 0
@@ -52,13 +59,18 @@ class AgentRunner:
         self, context_messages: List[Dict[str, Any]]
     ) -> TurnResult:
         self._model_turn_count += 1
-        chat_completion, interaction = (
-            await self._rollout_agent._sglang_client.generate(
-                messages=context_messages,
-                tools=self._tool_schemas,
-                turn_idx=self._model_turn_count,
+        t0 = time.perf_counter()
+        try:
+            chat_completion, interaction = (
+                await self._rollout_agent._sglang_client.generate(
+                    messages=context_messages,
+                    tools=self._tool_schemas,
+                    turn_idx=self._model_turn_count,
+                )
             )
-        )
+        finally:
+            self.sglang_generate_time += time.perf_counter() - t0
+            self.sglang_turn_count += 1
         model_response, tool_call_requests, parse_error_record = (
             await self._rollout_agent.consume_completion(chat_completion)
         )
@@ -246,22 +258,27 @@ class AgentRunner:
             len(tool_call_requests),
         )
         for tool_call_request in tool_call_requests:
+            t0 = time.perf_counter()
             try:
-                env_result = await self._env_client.exec_tool(
-                    self._lease_id,
-                    tool_call_request.tool_name,
-                    tool_call_request.args,
-                )
-            except Exception as exc:
-                logger.error(
-                    "%s Turn %d tool %s failed (%s): %s",
-                    self._log_tag,
-                    turn_idx,
-                    tool_call_request.tool_name,
-                    type(exc).__name__,
-                    exc,
-                )
-                raise
+                try:
+                    env_result = await self._env_client.exec_tool(
+                        self._lease_id,
+                        tool_call_request.tool_name,
+                        tool_call_request.args,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "%s Turn %d tool %s failed (%s): %s",
+                        self._log_tag,
+                        turn_idx,
+                        tool_call_request.tool_name,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    raise
+            finally:
+                self.tool_exec_time += time.perf_counter() - t0
+                self.tool_call_count += 1
             self._rollout_agent.record_tool_result(tool_call_request, env_result)
             if self._prm_agent is not None:
                 self._prm_agent.record_tool_result(

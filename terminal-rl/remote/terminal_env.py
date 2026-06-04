@@ -125,6 +125,7 @@ class TerminalEnv:
                 agent_logs_path=self._trial_handler.trial_paths.agent_logging_dir,
                 no_rebuild=True,
                 cleanup=False,
+                disable_recording=os.getenv("TBENCH_DISABLE_RECORDING", "1") == "1",
             )
             if image_prep.mode == "pull":
                 compose_up_no_build(

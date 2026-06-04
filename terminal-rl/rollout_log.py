@@ -32,14 +32,23 @@ def _percentile(sorted_xs: List[float], q: float) -> float:
     return sorted_xs[f] + (sorted_xs[c] - sorted_xs[f]) * (k - f)
 
 
-def _aggregate_timings(samples) -> Dict[str, float]:
+def _aggregate_timings(samples) -> Dict[str, Any]:
     """Aggregate per-sample `_perf` dicts attached by generate.py into mean /
     p50 / p95 / max distributions. Dedups by (group_index, index) because
     build_samples_from_outcome emits one Sample per turn, all sharing the
     same per-episode timing dict.
+
+    Also emits a `terminal/timing/critical_path/*` block holding the full
+    per-trajectory `_perf` of the slowest trajectory (the one whose `total`
+    determines rollout_time). Unlike `*/max` (which is independent per
+    stage and not additive), the critical_path fields all come from one
+    specific trajectory and satisfy `Σ stages == critical_path/total`.
     """
     seen = set()
     perfs: List[Dict[str, float]] = []
+    critical_perf: Dict[str, float] | None = None
+    critical_key: tuple | None = None
+    critical_total = float("-inf")
     for s in samples:
         key = (getattr(s, "group_index", None), getattr(s, "index", None))
         if key in seen:
@@ -47,8 +56,14 @@ def _aggregate_timings(samples) -> Dict[str, float]:
         seen.add(key)
         md = getattr(s, "metadata", None) or {}
         perf = md.get("_perf")
-        if isinstance(perf, dict):
-            perfs.append(perf)
+        if not isinstance(perf, dict):
+            continue
+        perfs.append(perf)
+        tot = perf.get("total")
+        if isinstance(tot, (int, float)) and tot > critical_total:
+            critical_total = float(tot)
+            critical_perf = perf
+            critical_key = key
     if not perfs:
         return {}
 
@@ -56,7 +71,7 @@ def _aggregate_timings(samples) -> Dict[str, float]:
     for p in perfs:
         keys.update(p.keys())
 
-    out: Dict[str, float] = {}
+    out: Dict[str, Any] = {}
     out["terminal/timing/n_samples"] = len(perfs)
     for k in sorted(keys):
         vals = [float(p[k]) for p in perfs if isinstance(p.get(k), (int, float))]
@@ -79,6 +94,17 @@ def _aggregate_timings(samples) -> Dict[str, float]:
     if shares:
         out["terminal/timing/sglang_share/mean"] = sum(shares) / len(shares)
         out["terminal/timing/sglang_share/p50"] = _percentile(sorted(shares), 0.50)
+
+    # Critical-path profile: full _perf of the slowest trajectory. These are
+    # additive (Σ stages == critical_path/total ≈ rollout_time), unlike */max.
+    if critical_perf is not None:
+        for k, v in critical_perf.items():
+            if isinstance(v, (int, float)):
+                out[f"terminal/timing/critical_path/{k}"] = float(v)
+        if critical_key is not None and critical_key[0] is not None:
+            out["terminal/timing/critical_path/group_index"] = int(critical_key[0])
+        if critical_key is not None and critical_key[1] is not None:
+            out["terminal/timing/critical_path/sample_index"] = int(critical_key[1])
     return out
 
 

@@ -1,0 +1,291 @@
+--- a/terminal-rl/dataset/seta_env/1133/docker-compose.yaml
++++ b/terminal-rl/dataset/seta_env/1133/docker-compose.yaml
+@@ -31,8 +31,8 @@
+     build:
+       context: ./services/web-server
+       dockerfile: Dockerfile
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__web-server
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__web-server
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__web-server
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__web-server
+     hostname: web-server
+     networks:
+       corp_network:
+@@ -42,8 +42,8 @@
+     build:
+       context: ./services/db-server
+       dockerfile: Dockerfile
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__db-server
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__db-server
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__db-server
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__db-server
+     hostname: db-server
+     networks:
+       corp_network:
+@@ -53,8 +53,8 @@
+     build:
+       context: ./services/app-server
+       dockerfile: Dockerfile
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__app-server
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__app-server
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__app-server
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__app-server
+     hostname: app-server
+     networks:
+       corp_network:
+@@ -64,8 +64,8 @@
+     build:
+       context: ./services/workstation
+       dockerfile: Dockerfile
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__workstation-1
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__workstation-1
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__workstation-1
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__workstation-1
+     hostname: workstation-1
+     networks:
+       corp_network:
+@@ -75,8 +75,8 @@
+     build:
+       context: ./services/workstation
+       dockerfile: Dockerfile
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__workstation-2
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__workstation-2
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__workstation-2
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__workstation-2
+     hostname: workstation-2
+     networks:
+       corp_network:
+@@ -86,8 +86,8 @@
+     build:
+       context: ./services/firewall-host
+       dockerfile: Dockerfile
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__firewall-host
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__firewall-host
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__firewall-host
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1133}__firewall-host
+     hostname: firewall-host
+     cap_add:
+       - NET_ADMIN
+--- a/terminal-rl/dataset/seta_env/1198/docker-compose.yaml
++++ b/terminal-rl/dataset/seta_env/1198/docker-compose.yaml
+@@ -31,8 +31,8 @@
+     build:
+       context: .
+       dockerfile: Dockerfile.bastion
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__bastion
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__bastion
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1198}__bastion
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1198}__bastion
+     hostname: bastion
+     command: [ "/usr/sbin/sshd", "-D" ]
+     networks:
+@@ -48,8 +48,8 @@
+     build:
+       context: .
+       dockerfile: Dockerfile.db
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__db-internal
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__db-internal
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1198}__db-internal
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__1198}__db-internal
+     hostname: db-internal
+     environment:
+       POSTGRES_USER: dbuser
+--- a/terminal-rl/dataset/seta_env/25/sample.log
++++ b/terminal-rl/dataset/seta_env/25/sample.log
+@@ -0,0 +1,51 @@
++2026-06-08T08:00:00Z ERROR request_id=0001 path=/api/orders response_time=588
++2026-06-08T08:00:01Z ERROR request_id=0002 path=/api/orders response_time=588
++2026-06-08T08:00:02Z ERROR request_id=0003 path=/api/orders response_time=588
++2026-06-08T08:00:03Z ERROR request_id=0004 path=/api/orders response_time=588
++2026-06-08T08:00:04Z ERROR request_id=0005 path=/api/orders response_time=588
++2026-06-08T08:00:05Z ERROR request_id=0006 path=/api/orders response_time=588
++2026-06-08T08:00:06Z ERROR request_id=0007 path=/api/orders response_time=588
++2026-06-08T08:00:07Z ERROR request_id=0008 path=/api/orders response_time=588
++2026-06-08T08:00:08Z ERROR request_id=0009 path=/api/orders response_time=588
++2026-06-08T08:00:09Z ERROR request_id=0010 path=/api/orders response_time=588
++2026-06-08T08:00:10Z ERROR request_id=0011 path=/api/orders response_time=588
++2026-06-08T08:00:11Z ERROR request_id=0012 path=/api/orders response_time=588
++2026-06-08T08:00:12Z WARN request_id=0013 path=/api/cache response_time=588
++2026-06-08T08:00:13Z WARN request_id=0014 path=/api/cache response_time=588
++2026-06-08T08:00:14Z WARN request_id=0015 path=/api/cache response_time=588
++2026-06-08T08:00:15Z WARN request_id=0016 path=/api/cache response_time=588
++2026-06-08T08:00:16Z WARN request_id=0017 path=/api/cache response_time=588
++2026-06-08T08:00:17Z WARN request_id=0018 path=/api/cache response_time=588
++2026-06-08T08:00:18Z WARN request_id=0019 path=/api/cache response_time=588
++2026-06-08T08:00:19Z WARN request_id=0020 path=/api/cache response_time=588
++2026-06-08T08:00:20Z WARN request_id=0021 path=/api/cache response_time=588
++2026-06-08T08:00:21Z WARN request_id=0022 path=/api/cache response_time=588
++2026-06-08T08:00:22Z WARN request_id=0023 path=/api/cache response_time=588
++2026-06-08T08:00:23Z WARN request_id=0024 path=/api/cache response_time=588
++2026-06-08T08:00:24Z WARN request_id=0025 path=/api/cache response_time=588
++2026-06-08T08:00:25Z INFO request_id=0026 path=/api/items response_time=588
++2026-06-08T08:00:26Z INFO request_id=0027 path=/api/items response_time=588
++2026-06-08T08:00:27Z INFO request_id=0028 path=/api/items response_time=588
++2026-06-08T08:00:28Z INFO request_id=0029 path=/api/items response_time=588
++2026-06-08T08:00:29Z INFO request_id=0030 path=/api/items response_time=588
++2026-06-08T08:00:30Z INFO request_id=0031 path=/api/items response_time=588
++2026-06-08T08:00:31Z INFO request_id=0032 path=/api/items response_time=588
++2026-06-08T08:00:32Z INFO request_id=0033 path=/api/items response_time=588
++2026-06-08T08:00:33Z INFO request_id=0034 path=/api/items response_time=588
++2026-06-08T08:00:34Z INFO request_id=0035 path=/api/items response_time=588
++2026-06-08T08:00:35Z INFO request_id=0036 path=/api/items response_time=588
++2026-06-08T08:00:36Z INFO request_id=0037 path=/api/items response_time=588
++2026-06-08T08:00:37Z INFO request_id=0038 path=/api/items response_time=588
++2026-06-08T08:00:38Z INFO request_id=0039 path=/api/items response_time=588
++2026-06-08T08:00:39Z INFO request_id=0040 path=/api/items response_time=588
++2026-06-08T08:00:40Z INFO request_id=0041 path=/api/items response_time=588
++2026-06-08T08:00:41Z INFO request_id=0042 path=/api/items response_time=588
++2026-06-08T08:00:42Z INFO request_id=0043 path=/api/items response_time=588
++2026-06-08T08:00:43Z INFO request_id=0044 path=/api/items response_time=588
++2026-06-08T08:00:44Z INFO request_id=0045 path=/api/items response_time=588
++2026-06-08T08:00:45Z INFO request_id=0046 path=/api/items response_time=588
++2026-06-08T08:00:46Z INFO request_id=0047 path=/api/items response_time=588
++2026-06-08T08:00:47Z INFO request_id=0048 path=/api/items response_time=588
++2026-06-08T08:00:48Z INFO request_id=0049 path=/api/items response_time=588
++2026-06-08T08:00:49Z INFO request_id=0050 path=/api/items response_time=588
++2026-06-08T08:00:50Z INFO request_id=0051 path=/api/items response_time=620
+--- a/terminal-rl/dataset/seta_env/305/Dockerfile
++++ b/terminal-rl/dataset/seta_env/305/Dockerfile
+@@ -15,7 +15,7 @@
+ 
+ FROM ghcr.io/laude-institute/t-bench/ubuntu-24-04:20250624
+ 
+-# Add a sample test image for testing
+-RUN apt-get update && apt-get install -y wget && \
+-    wget -O /app/test-image.png https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Google_2015_logo.svg/320px-Google_2015_logo.svg.png && \
+-    apt-get clean && rm -rf /var/lib/apt/lists/*
++# Add a small local PNG test image without depending on external network access.
++RUN mkdir -p /app && \
++    printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lumF8QAAAABJRU5ErkJggg==' | \
++    base64 -d > /app/test-image.png
+--- a/terminal-rl/dataset/seta_env/890/docker-compose.yaml
++++ b/terminal-rl/dataset/seta_env/890/docker-compose.yaml
+@@ -24,24 +24,24 @@
+   dev-server:
+     build:
+       dockerfile: Dockerfile.sshserver
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__dev-server
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__dev-server
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__890}__dev-server
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__890}__dev-server
+     networks:
+       - ssh_network
+ 
+   staging-server:
+     build:
+       dockerfile: Dockerfile.sshserver
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__staging-server
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__staging-server
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__890}__staging-server
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__890}__staging-server
+     networks:
+       - ssh_network
+ 
+   prod-bastion:
+     build:
+       dockerfile: Dockerfile.sshserver
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__prod-bastion
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__prod-bastion
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__890}__prod-bastion
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__890}__prod-bastion
+     networks:
+       - ssh_network
+ 
+--- a/terminal-rl/dataset/seta_env/892/docker-compose.yaml
++++ b/terminal-rl/dataset/seta_env/892/docker-compose.yaml
+@@ -27,8 +27,8 @@
+   remote-server:
+     build:
+       dockerfile: Dockerfile.server
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__remote-server
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__remote-server
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__892}__remote-server
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__892}__remote-server
+     hostname: remote-server
+     volumes:
+       - ssh-keys:/tmp/client-keys:ro
+--- a/terminal-rl/dataset/seta_env/973/docker-compose.yaml
++++ b/terminal-rl/dataset/seta_env/973/docker-compose.yaml
+@@ -29,8 +29,8 @@
+   worker:
+     build:
+       dockerfile: Dockerfile.worker
+-    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__worker
+-    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX}__worker
++    image: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__973}__worker
++    container_name: ${T_BENCH_TASK_DOCKER_NAME_PREFIX:-tb__973}__worker
+     networks:
+       - locale-net
+ 
+--- a/terminal-rl/dataset/seta_env/973/Dockerfile
++++ b/terminal-rl/dataset/seta_env/973/Dockerfile
+@@ -44,7 +44,7 @@
+ RUN mkdir -p /app/scripts
+ 
+ # Python script that uses locale-aware string sorting
+-RUN cat > /app/scripts/process_data.py << 'PYEOF'
++COPY <<'PYEOF' /app/scripts/process_data.py
+ #!/usr/bin/env python3
+ """
+ Data processing script that uses locale-aware string operations.
+@@ -99,7 +99,7 @@
+ PYEOF
+ 
+ # Perl script that processes UTF-8 text files
+-RUN cat > /app/scripts/process_text.pl << 'PERLEOF'
++COPY <<'PERLEOF' /app/scripts/process_text.pl
+ #!/usr/bin/env perl
+ use strict;
+ use warnings;
+--- a/terminal-rl/dataset/seta_env/973/Dockerfile.worker
++++ b/terminal-rl/dataset/seta_env/973/Dockerfile.worker
+@@ -27,7 +27,7 @@
+ RUN mkdir -p /app/scripts
+ 
+ # Python script that uses locale-aware string sorting
+-RUN cat > /app/scripts/process_data.py << 'PYEOF'
++COPY <<'PYEOF' /app/scripts/process_data.py
+ #!/usr/bin/env python3
+ """
+ Data processing script that uses locale-aware string operations.
+@@ -82,7 +82,7 @@
+ PYEOF
+ 
+ # Perl script that processes UTF-8 text files
+-RUN cat > /app/scripts/process_text.pl << 'PERLEOF'
++COPY <<'PERLEOF' /app/scripts/process_text.pl
+ #!/usr/bin/env perl
+ use strict;
+ use warnings;
+--- a/terminal-rl/dataset/seta_env/999/mock_dmesg.log
++++ b/terminal-rl/dataset/seta_env/999/mock_dmesg.log
+@@ -0,0 +1,16 @@
++[    0.000000] Linux version 6.8.0-mock (builder@diagnostic-host)
++[    0.421112] pci 0000:00:02.0: vgaarb: setting as boot VGA device
++[    1.114210] i915: module is blacklisted, falling back to vesa driver
++[    1.114904] vesa: Intel HD Graphics 530 using generic framebuffer
++[    2.308501] xhci_hcd 0000:00:14.0: xHCI Host Controller initialized
++[    3.016844] snd_hda_intel 0000:00:1f.3: bound to Intel HD Audio Controller
++[    4.274193] iwlwifi 0000:01:00.0: loaded firmware version 36.952d8088.0
++[    4.982441] r8169 0000:02:00.0: Direct firmware load for rtl_nic/rtl8168h-2.fw failed with error -2
++[    4.982977] r8169 0000:02:00.0: ERROR: firmware rtl_nic/rtl8168h-2.fw not found
++[    5.231118] nvme: module is blacklisted
++[    5.231721] ahci 0000:03:00.0: Samsung NVMe controller bound through compatibility mode
++[    5.232010] nvme: Device 03:00.0 could benefit from nvme driver instead of ahci
++[    6.019044] nouveau 0000:04:00.0: NVIDIA GP107 detected
++[    6.019552] nouveau 0000:04:00.0: WARNING: running with nouveau instead of proprietary nvidia driver
++[    6.778301] ACPI Warning: SystemIO range conflicts with OpRegion
++[    6.779003] lpc_ich: Resource conflict(s) found affecting gpio_ich
+--- a/terminal-rl/dataset/seta_env/999/mock_journalctl.log
++++ b/terminal-rl/dataset/seta_env/999/mock_journalctl.log
+@@ -0,0 +1,10 @@
++Jun 08 08:00:01 diagnostic-host kernel: i915: module is blacklisted, falling back to vesa driver
++Jun 08 08:00:02 diagnostic-host kernel: r8169 0000:02:00.0: ERROR: firmware rtl_nic/rtl8168h-2.fw not found
++Jun 08 08:00:03 diagnostic-host kernel: nvme: module is blacklisted
++Jun 08 08:00:04 diagnostic-host kernel: nvme: Device 03:00.0 could benefit from nvme driver instead of ahci
++Jun 08 08:00:05 diagnostic-host kernel: nouveau 0000:04:00.0: WARNING: running with nouveau instead of proprietary nvidia driver
++Jun 08 08:00:06 diagnostic-host systemd-modules-load[312]: Module 'i915' is blacklisted
++Jun 08 08:00:07 diagnostic-host systemd-modules-load[312]: Module 'nvme' is blacklisted
++Jun 08 08:00:08 diagnostic-host systemd-modules-load[312]: Module 'nvidia' is blacklisted
++Jun 08 08:00:09 diagnostic-host kernel: ACPI Warning: SystemIO range conflicts with OpRegion
++Jun 08 08:00:10 diagnostic-host kernel: lpc_ich: Resource conflict(s) found affecting gpio_ich

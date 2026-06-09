@@ -87,10 +87,12 @@ class WorkerPool:
         output_root: str,
         default_timeouts: TaskTimeouts,
         idempotency_ttl: int = 300,
+        max_concurrent_resets: int = 16,
         max_concurrent_closes: int = 8,
     ) -> None:
         self.max_tasks = max_tasks
         self.max_runs_per_task = max_runs_per_task
+        self.max_concurrent_resets = max_concurrent_resets
         self.run_idle_ttl = run_idle_ttl
         self.output_root = Path(output_root).resolve()
         self.output_root.mkdir(parents=True, exist_ok=True)
@@ -102,6 +104,7 @@ class WorkerPool:
         self._idempotency: dict[tuple[str, str], tuple[str, float]] = {}
         self._lock = asyncio.Lock()
 
+        self._reset_sem = asyncio.Semaphore(max_concurrent_resets)
         self._close_sem = asyncio.Semaphore(max_concurrent_closes)
         self._closing_tasks: set[asyncio.Task] = set()
 
@@ -247,15 +250,16 @@ class WorkerPool:
         run_ctx = RunContext.from_payload(run_ctx_payload)
         timeouts = _parse_timeout_overrides(self.default_timeouts, task_timeouts)
 
-        async with run_slot.lock:
-            self._touch_run_slot(run_slot)
-            user_msg, tool_schemas = await run_slot.env.reset(
-                task_meta=task_meta,
-                run_ctx=run_ctx,
-                timeouts=timeouts,
-            )
-            self._touch_run_slot(run_slot)
-            return {"user_msg": user_msg, "tool_schemas": tool_schemas}
+        async with self._reset_sem:
+            async with run_slot.lock:
+                self._touch_run_slot(run_slot)
+                user_msg, tool_schemas = await run_slot.env.reset(
+                    task_meta=task_meta,
+                    run_ctx=run_ctx,
+                    timeouts=timeouts,
+                )
+                self._touch_run_slot(run_slot)
+                return {"user_msg": user_msg, "tool_schemas": tool_schemas}
 
     async def exec_tool(
         self, run_lease_id: str, tool_name: str, arguments: dict[str, Any] | None = None
@@ -309,6 +313,7 @@ class WorkerPool:
                 "max_tasks": self.max_tasks,
                 "active_tasks": len(self._tasks),
                 "max_runs_per_task": self.max_runs_per_task,
+                "max_concurrent_resets": self.max_concurrent_resets,
                 "total_active_runs": total_runs,
                 "pending_closes": len(self._closing_tasks),
                 "tasks": tasks_info,
@@ -625,6 +630,12 @@ def parse_args() -> argparse.Namespace:
         default=int(os.getenv("WORKER_MAX_CONCURRENT_CLOSES", "10")),
         help="Max concurrent Docker stop operations",
     )
+    parser.add_argument(
+        "--max-concurrent-resets",
+        type=int,
+        default=int(os.getenv("WORKER_MAX_CONCURRENT_RESETS", "16")),
+        help="Max concurrent env reset / Docker compose up operations",
+    )
 
     return parser.parse_args()
 
@@ -648,15 +659,17 @@ def main() -> None:
             close_session=float(args.close_session_timeout),
             eval=float(args.eval_timeout),
         ),
+        max_concurrent_resets=args.max_concurrent_resets,
         max_concurrent_closes=args.max_concurrent_closes,
     )
 
     logger.info(
-        "Starting worker server on %s:%s  max_tasks=%s  max_runs_per_task=%s",
+        "Starting worker server on %s:%s  max_tasks=%s  max_runs_per_task=%s  max_concurrent_resets=%s",
         args.host,
         args.port,
         args.max_tasks,
         args.max_runs_per_task,
+        args.max_concurrent_resets,
     )
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

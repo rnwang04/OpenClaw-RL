@@ -19,6 +19,9 @@ if [ -d "${REPO_ROOT}/.venv" ]; then
   source .venv/bin/activate
 fi
 
+pkill -KILL -f 'terminal-rl.remote.pool_server' || true
+pkill -KILL -f 'pool_server.py'                 || true
+docker ps -aq | xargs -r docker rm -f
 docker network prune -f
 docker container prune -f
 
@@ -28,4 +31,6 @@ exec python -m terminal-rl.remote.pool_server \
   --port "${ENV_SERVER_PORT:-18081}" \
   --max-tasks "${WORKER_MAX_TASKS:-16}" \
   --max-runs-per-task "${WORKER_MAX_RUNS_PER_TASK:-8}" \
+  --max-concurrent-resets "${WORKER_MAX_CONCURRENT_RESETS:-16}" \
+  --max-concurrent-closes "${WORKER_MAX_CONCURRENT_CLOSES:-10}" \
   --output-root "${TBENCH_OUTPUT_ROOT}"

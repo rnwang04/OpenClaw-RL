@@ -17,6 +17,11 @@ from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_
 from slime.backends.sglang_utils.sglang_engine import SGLangEngine
 from slime.rollout.base_types import call_rollout_fn
 from slime.utils import logging_utils
+from slime.utils.dynamic_batch import (
+    compute_dynamic_global_batch_size,
+    get_aligned_train_data_trim_len,
+    trim_sample_aligned_data,
+)
 from slime.utils.health_monitor import RolloutHealthMonitor
 from slime.utils.http_utils import _wrap_ipv6, find_available_port, get_host_info, init_http_client
 from slime.utils.logging_utils import configure_logger, init_tracking
@@ -155,6 +160,7 @@ class RolloutManager:
         self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=False)
         _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
         data = self._convert_samples_to_train_data(data)
+        self._align_train_data_after_filtering(data)
         return self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
 
     def eval(self, rollout_id):
@@ -255,34 +261,40 @@ class RolloutManager:
                 data = list(itertools.chain.from_iterable(data))
 
             if not self.args.disable_rollout_trim_samples:
-                global_batch_size = self.args.global_batch_size
-                target_steps_per_rollout = getattr(self.args, "num_steps_per_rollout", None)
-                # dynamic_history can expand one rollout into many step-wise samples.
-                # In that case, honor num_steps_per_rollout by deriving a per-rollout
-                # dynamic global batch size from the actual collected sample count.
-                auto_dynamic_for_history = (
-                    getattr(self.args, "dynamic_history", False) and target_steps_per_rollout is not None
-                )
-                use_dynamic_gbs = self.args.use_dynamic_global_batch_size or auto_dynamic_for_history
-                dynamic_target_steps = target_steps_per_rollout if auto_dynamic_for_history else None
+                use_dynamic_gbs, dynamic_target_steps = self._get_dynamic_gbs_config()
                 if use_dynamic_gbs:
-                    logger.info(f"Collected {len(data)} samples from rollout to train with dynamic global batch size")
-                    # TODO: this is a temporary solution, we should directly save dynamic_global_batch_size to rollout data
-                    self._dynamic_global_batch_size = self._compute_dynamic_global_batch_size(
-                        len(data), target_steps=dynamic_target_steps
+                    logger.info(
+                        "Collected %d samples from rollout to train; defer dynamic global_batch_size until "
+                        "after train-data filters (target_steps=%s)",
+                        len(data),
+                        dynamic_target_steps,
                     )
-                    global_batch_size = self._dynamic_global_batch_size
-
-                if len(data) % global_batch_size != 0:
-                    trim_len = (len(data) // global_batch_size) * global_batch_size
-                    if trim_len == 0:
-                        raise ValueError(f"Not enough samples {len(data)} for global_batch_size {global_batch_size}")
-                    origin_data_length = len(data)
-                    data = data[:trim_len]
-                    logger.info(f"trim number of samples from {origin_data_length} to {trim_len}")
+                else:
+                    global_batch_size = self.args.global_batch_size
+                    if len(data) % global_batch_size != 0:
+                        trim_len = (len(data) // global_batch_size) * global_batch_size
+                        if trim_len == 0:
+                            raise ValueError(
+                                f"Not enough samples {len(data)} for global_batch_size {global_batch_size}"
+                            )
+                        origin_data_length = len(data)
+                        data = data[:trim_len]
+                        logger.info(f"trim number of samples from {origin_data_length} to {trim_len}")
                 logger.info(f"Final collected {len(data)} samples from rollout to train")
 
         return data, metrics
+
+    def _get_dynamic_gbs_config(self) -> tuple[bool, int | None]:
+        target_steps_per_rollout = getattr(self.args, "num_steps_per_rollout", None)
+        # dynamic_history can expand one rollout into many step-wise samples.
+        # In that case, honor num_steps_per_rollout by deriving a per-rollout
+        # dynamic global batch size from the actual collected sample count.
+        auto_dynamic_for_history = (
+            getattr(self.args, "dynamic_history", False) and target_steps_per_rollout is not None
+        )
+        use_dynamic_gbs = getattr(self.args, "use_dynamic_global_batch_size", False) or auto_dynamic_for_history
+        dynamic_target_steps = target_steps_per_rollout if auto_dynamic_for_history else None
+        return use_dynamic_gbs, dynamic_target_steps
 
     def _compute_dynamic_global_batch_size(self, num_samples: int, target_steps: int | None = None) -> int:
         """Calculate dynamic global_batch_size from actual per-rollout samples.
@@ -293,20 +305,15 @@ class RolloutManager:
         """
         dp_size = self.train_parallel_config["dp_size"]
         original_gbs = self.args.global_batch_size
-
-        desired_steps = int(target_steps) if target_steps is not None and target_steps > 0 else 1
-        # Target per-step samples, then round down to a multiple of dp_size.
-        per_step_target = max(1, num_samples // desired_steps)
-        dynamic_gbs = (per_step_target // dp_size) * dp_size
-
-        if dynamic_gbs == 0:
-            # Too few samples, use at least dp_size.
-            dynamic_gbs = dp_size
-            logger.warning(f"num_samples={num_samples} < dp_size={dp_size}, using dp_size as global_batch_size")
-
-        realized_steps = max(1, num_samples // dynamic_gbs)
-        # Calculate how many samples will be discarded after trim.
-        wasted = num_samples % dynamic_gbs
+        dynamic_gbs, desired_steps, realized_steps, wasted = compute_dynamic_global_batch_size(
+            num_samples,
+            dp_size=dp_size,
+            target_steps=target_steps,
+        )
+        if num_samples < dp_size:
+            logger.warning(
+                f"num_samples={num_samples} < dp_size={dp_size}, using dp_size as global_batch_size"
+            )
 
         if dynamic_gbs != original_gbs or wasted > 0 or realized_steps != desired_steps:
             logger.info(
@@ -316,6 +323,53 @@ class RolloutManager:
             )
 
         return dynamic_gbs
+
+    def _align_train_data_after_filtering(self, data: dict[str, Any]) -> None:
+        """Re-align GBS and per-sample fields after train-data filters.
+
+        Constant-reward filtering happens inside ``_convert_samples_to_train_data``.
+        Dynamic GBS must therefore be computed from the filtered sample count,
+        otherwise DP ranks can derive different local tail steps.
+        """
+        if self.args.disable_rollout_trim_samples:
+            return
+        if "tokens" not in data:
+            return
+
+        num_samples = len(data["tokens"])
+        if num_samples == 0:
+            raise ValueError("No training samples remain after rollout filtering")
+
+        dp_size = self.train_parallel_config["dp_size"]
+        use_dynamic_gbs, dynamic_target_steps = self._get_dynamic_gbs_config()
+        if use_dynamic_gbs:
+            global_batch_size = self._compute_dynamic_global_batch_size(
+                num_samples,
+                target_steps=dynamic_target_steps,
+            )
+            self._dynamic_global_batch_size = global_batch_size
+        else:
+            global_batch_size = self.args.global_batch_size
+            if hasattr(self, "_dynamic_global_batch_size"):
+                delattr(self, "_dynamic_global_batch_size")
+
+        trim_len = get_aligned_train_data_trim_len(
+            num_samples,
+            global_batch_size=global_batch_size,
+            dp_size=dp_size,
+        )
+        if trim_len == 0:
+            raise ValueError(f"Not enough train samples {num_samples} for dp_size {dp_size}")
+
+        if trim_len != num_samples:
+            trim_sample_aligned_data(data, trim_len, num_samples)
+            logger.info(
+                "Trim train data after filtering from %d to %d (global_batch_size=%d, dp_size=%d)",
+                num_samples,
+                trim_len,
+                global_batch_size,
+                dp_size,
+            )
 
     def _save_debug_rollout_data(self, data, rollout_id, evaluation: bool):
         # TODO to be refactored (originally Buffer._set_data)
@@ -762,20 +816,25 @@ class RolloutManager:
             rollout_data["prompt"] = data["prompt"]
 
         total_lengths = [len(t) for t in data["tokens"]]
+
+        # Trim to a multiple of dp_size so all DP ranks receive equal-sized
+        # partitions. Unequal sizes cause different dynamic_num_steps values on
+        # different ranks, which produces num_microbatches tensors of different
+        # lengths that deadlock inside dist.all_reduce (NCCL timeout).
+        n = len(total_lengths)
+        n_trimmed = (n // dp_size) * dp_size
+        if n_trimmed < n:
+            logger.warning(
+                "Trimming %d training samples to %d (dropped %d) "
+                "to ensure equal DP partition sizes (dp_size=%d).",
+                n, n_trimmed, n - n_trimmed, dp_size,
+            )
+            total_lengths = total_lengths[:n_trimmed]
+
         data["total_lengths"] = total_lengths
 
         if self.args.balance_data:
-            # Equal-size partitioning requires divisibility by dp_size.
-            # Dynamic rollout/history can produce tail batches that violate this.
-            use_equal_size = (len(total_lengths) % dp_size) == 0
-            if not use_equal_size:
-                logger.warning(
-                    "balance-data fallback: num_samples=%d is not divisible by dp_size=%d; "
-                    "using unequal-size seqlen balancing for this rollout step.",
-                    len(total_lengths),
-                    dp_size,
-                )
-            partitions = get_seqlen_balanced_partitions(total_lengths, dp_size, equal_size=use_equal_size)
+            partitions = get_seqlen_balanced_partitions(total_lengths, dp_size, equal_size=True)
         else:
             partitions = [range(i, len(total_lengths), dp_size) for i in range(dp_size)]
 

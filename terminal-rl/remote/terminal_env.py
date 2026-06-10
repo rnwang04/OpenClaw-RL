@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -76,6 +77,56 @@ class TerminalEnv:
         self._parser = None
         self._terminal_toolkit: TerminalToolkit | None = None
         self._tools: dict[str, Any] = {}
+
+    def _install_uv_for_tests(self, test_script_path: str) -> None:
+        """Patch the copied test runner so eval does not download uv at runtime."""
+        if os.getenv("TBENCH_TEST_UV_HOOK", "1") == "0":
+            return
+
+        uv_bin = os.getenv("TBENCH_TEST_UV_BIN", "/opt/tb-venv/bin/uv")
+        if self._terminal is None:
+            raise RuntimeError("env is not initialized; call reset first")
+
+        installer_pattern = (
+            r"astral\.sh\/uv\/0\.7\.13\/install\.sh|"
+            r"github\.com\/astral-sh\/uv\/releases\/download\/0\.7\.13"
+        )
+        setup_cmd = "; ".join(
+            [
+                "set -eu",
+                f"UV_SRC={shlex.quote(uv_bin)}",
+                (
+                    'if [ ! -x "$UV_SRC" ]; then '
+                    'echo "[openclaw-uv-hook] uv not found or not executable: $UV_SRC" >&2; '
+                    "exit 1; "
+                    "fi"
+                ),
+                'mkdir -p "$HOME/.local/bin"',
+                'cp "$UV_SRC" "$HOME/.local/bin/uv"',
+                'chmod +x "$HOME/.local/bin/uv"',
+                (
+                    "printf '%s\\n' "
+                    '\'export PATH="$HOME/.local/bin:$PATH"\' '
+                    '> "$HOME/.local/bin/env"'
+                ),
+                (
+                    f"if [ -f {shlex.quote(test_script_path)} ]; then "
+                    f"sed -i -E {shlex.quote('/' + installer_pattern + '/d')} "
+                    f"{shlex.quote(test_script_path)}; "
+                    "fi"
+                ),
+            ]
+        )
+        setup_session = self._terminal.create_session(
+            "openclaw_uv_hook",
+            is_active_stream=False,
+            as_configured_user=False,
+        )
+        setup_session.send_keys(
+            [f"bash -lc {shlex.quote(setup_cmd)}", "Enter"],
+            block=True,
+            max_timeout_sec=float(os.getenv("TBENCH_TEST_UV_HOOK_TIMEOUT", "30")),
+        )
 
     async def reset(
         self,
@@ -239,6 +290,7 @@ class TerminalEnv:
             test_script_path = str(
                 DockerComposeManager.CONTAINER_TEST_DIR / "run-tests.sh"
             )
+            self._install_uv_for_tests(test_script_path)
             test_timeout_sec = min(
                 self._timeouts.eval,
                 4 * self._trial_handler.task.max_test_timeout_sec,

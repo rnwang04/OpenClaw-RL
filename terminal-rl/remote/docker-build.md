@@ -53,7 +53,6 @@ docker run -d --name openclaw-rl \
   -v /data1/ruonan/logs:/logs \
   -v /data1/ruonan/openclaw-dind-data:/var/lib/docker \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-  --entrypoint /bin/sh \
   openclaw-rl:dind \
   tail -f /dev/null
 

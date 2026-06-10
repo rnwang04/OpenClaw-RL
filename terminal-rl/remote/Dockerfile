@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---- docker 29.1.3 + compose 2.40.3 ------------------------------------------
 ARG DOCKER_VERSION=29.1.3
 ARG COMPOSE_VERSION=2.40.3
+ARG DOCKER_PACKAGE_EPOCH=5
 ARG DOCKER_APT_URL=https://download.docker.com/linux/ubuntu
 ARG DOCKER_GPG_URL=
 RUN install -m 0755 -d /etc/apt/keyrings \
@@ -36,8 +37,8 @@ RUN install -m 0755 -d /etc/apt/keyrings \
         ${DOCKER_APT_URL} noble stable" \
         > /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && PKG_VER="5:${DOCKER_VERSION}-1~ubuntu.24.04~noble" \
-    && CLI_VER="1:${DOCKER_VERSION}-1~ubuntu.24.04~noble" \
+    && PKG_VER="${DOCKER_PACKAGE_EPOCH}:${DOCKER_VERSION}-1~ubuntu.24.04~noble" \
+    && CLI_VER="${DOCKER_PACKAGE_EPOCH}:${DOCKER_VERSION}-1~ubuntu.24.04~noble" \
     && COMPOSE_PKG="${COMPOSE_VERSION}-1~ubuntu.24.04~noble" \
     && apt-get install -y --no-install-recommends \
         docker-ce=${PKG_VER} \

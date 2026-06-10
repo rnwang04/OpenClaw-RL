@@ -23,6 +23,7 @@ docker build --network=host -t openclaw-rl:dind .
 docker build \
   --build-arg DOCKER_VERSION=29.1.3 \
   --build-arg COMPOSE_VERSION=2.40.3 \
+  --build-arg DOCKER_PACKAGE_EPOCH=5 \
   -t openclaw-rl:dind .
 
 # download.docker.com 连接被 reset 时，切 Docker CE apt 镜像源
@@ -72,5 +73,6 @@ ls /OpenClaw-RL && (cd /OpenClaw-RL && git branch --show-current)  # fix-termina
 ## 常见问题
 
 - **构建时报找不到 `5:29.1.3-1~ubuntu.24.04~noble`**：去 `https://download.docker.com/linux/ubuntu/dists/noble/pool/stable/$(arch)/` 查看实际可用版本号，把 `--build-arg DOCKER_VERSION=` 改成存在的版本，或在 Dockerfile 里去掉版本锁。
+- **构建时报找不到 `docker-ce-cli` 的 `1:...` 版本**：Docker CE noble 源里的 `docker-ce` 和 `docker-ce-cli` 使用同一个 epoch，默认是 `5:`；如果镜像源元数据不同，可在临时容器里用 `apt-cache madison docker-ce docker-ce-cli docker-compose-plugin` 查看精确版本。
 - **`dockerd` 起不来**：先确认 run 时加了 `--privileged` 和 cgroup mount；查看容器内 `/tmp/dockerd.log`。
 - **拉 docker.com GPG 慢/失败**：优先用 `--build-arg DOCKER_APT_URL=https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu` 或 Aliyun 镜像源；必要时再加 `--build-arg HTTPS_PROXY=...` 并在 Dockerfile 中 `ENV HTTPS_PROXY` 透传。

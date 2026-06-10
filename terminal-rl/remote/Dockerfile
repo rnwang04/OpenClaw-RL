@@ -49,8 +49,21 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- docker daemon config -----------------------------------------------------
-RUN mkdir -p /etc/docker
-COPY daemon.json /etc/docker/daemon.json
+RUN mkdir -p /etc/docker \
+    && printf '%s\n' \
+        '{' \
+        '  "default-address-pools": [' \
+        '    { "base": "10.200.0.0/12", "size": 24 },' \
+        '    { "base": "172.28.0.0/14", "size": 24 }' \
+        '  ],' \
+        '  "registry-mirrors": [' \
+        '    "https://docker.xuanyuan.dev",' \
+        '    "https://docker.1ms.run",' \
+        '    "https://hub.rat.dev",' \
+        '    "https://docker.m.daocloud.io"' \
+        '  ]' \
+        '}' \
+        > /etc/docker/daemon.json
 
 # ---- uv -----------------------------------------------------------------------
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
@@ -60,8 +73,27 @@ RUN git clone --branch fix-terminal-rl --single-branch \
         https://github.com/rnwang04/OpenClaw-RL.git /OpenClaw-RL
 
 # ---- entrypoint: start dockerd then drop into shell --------------------------
-COPY dind-entrypoint.sh /usr/local/bin/dind-entrypoint.sh
-RUN chmod +x /usr/local/bin/dind-entrypoint.sh
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        'set -e' \
+        '' \
+        'rm -rf /var/run/docker /run/docker /var/run/containerd /run/containerd' \
+        'mkdir -p /var/run /run' \
+        '' \
+        'nohup dockerd \' \
+        '    --config-file=/etc/docker/daemon.json \' \
+        '    --host=unix:///var/run/docker.sock \' \
+        '    > /tmp/dockerd.log 2>&1 &' \
+        '' \
+        '# wait for socket' \
+        'for i in $(seq 1 30); do' \
+        '    [ -S /var/run/docker.sock ] && break' \
+        '    sleep 1' \
+        'done' \
+        '' \
+        'exec "$@"' \
+        > /usr/local/bin/dind-entrypoint.sh \
+    && chmod +x /usr/local/bin/dind-entrypoint.sh
 
 WORKDIR /OpenClaw-RL
 ENTRYPOINT ["/usr/local/bin/dind-entrypoint.sh"]

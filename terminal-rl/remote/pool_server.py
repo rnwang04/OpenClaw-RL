@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from ..custom_types import RunContext, TaskTimeouts
 from ..request_utils import json_payload
+from ..task_filter import get_blocked_task_names
 from .terminal_env import TerminalEnv
 
 logger = logging.getLogger("terminal.env.worker")
@@ -60,6 +61,13 @@ class CapacityError(Exception):
         super().__init__(message)
 
 
+class BlockedTaskError(Exception):
+    def __init__(self, task_key: str):
+        self.code = "BLOCKED_TASK"
+        self.message = f"Task {task_key} is blocked by worker safety policy"
+        super().__init__(self.message)
+
+
 @dataclass
 class RunSlot:
     run_lease_id: str
@@ -89,6 +97,7 @@ class WorkerPool:
         idempotency_ttl: int = 300,
         max_concurrent_resets: int = 16,
         max_concurrent_closes: int = 8,
+        blocked_task_names: frozenset[str] | None = None,
     ) -> None:
         self.max_tasks = max_tasks
         self.max_runs_per_task = max_runs_per_task
@@ -98,6 +107,11 @@ class WorkerPool:
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.default_timeouts = default_timeouts
         self.idempotency_ttl = idempotency_ttl
+        self.blocked_task_names = (
+            get_blocked_task_names()
+            if blocked_task_names is None
+            else frozenset(blocked_task_names)
+        )
 
         self._tasks: dict[str, TaskSlot] = {}
         self._run_to_task: dict[str, str] = {}
@@ -184,6 +198,9 @@ class WorkerPool:
     async def allocate(
         self, task_key: str, request_id: str | None = None
     ) -> dict[str, Any]:
+        if task_key in self.blocked_task_names:
+            raise BlockedTaskError(task_key)
+
         async with self._lock:
             expired_slots = self._reap_idle_locked()
 
@@ -244,8 +261,17 @@ class WorkerPool:
         if not isinstance(run_ctx_payload, dict):
             raise ValueError("run_ctx_payload must be a dict")
 
+        task_name = str(task_meta.get("task_name", "")).strip()
+        if task_name in self.blocked_task_names:
+            raise BlockedTaskError(task_name)
+
         async with self._lock:
             run_slot = self._get_run_slot(run_lease_id)
+            if task_name != run_slot.task_key:
+                raise ValueError(
+                    f"task_meta task_name {task_name!r} does not match allocated task "
+                    f"{run_slot.task_key!r}"
+                )
 
         run_ctx = RunContext.from_payload(run_ctx_payload)
         timeouts = _parse_timeout_overrides(self.default_timeouts, task_timeouts)
@@ -403,6 +429,11 @@ async def allocate(request: Request) -> JSONResponse:
         return JSONResponse(
             {"ok": False, "error": exc.message, "code": exc.code}, status_code=429
         )
+    except BlockedTaskError as exc:
+        logger.warning("Rejected blocked task allocation: %s", task_key)
+        return JSONResponse(
+            {"ok": False, "error": exc.message, "code": exc.code}
+        )
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
@@ -467,6 +498,11 @@ async def reset(request: Request) -> JSONResponse:
             task_timeouts=task_timeouts,
         )
         return JSONResponse({"ok": True, **out})
+    except BlockedTaskError as exc:
+        logger.warning("Rejected blocked task reset: %s", task_meta.get("task_name"))
+        return JSONResponse(
+            {"ok": False, "error": exc.message, "code": exc.code}
+        )
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
@@ -661,15 +697,17 @@ def main() -> None:
         ),
         max_concurrent_resets=args.max_concurrent_resets,
         max_concurrent_closes=args.max_concurrent_closes,
+        blocked_task_names=get_blocked_task_names(),
     )
 
     logger.info(
-        "Starting worker server on %s:%s  max_tasks=%s  max_runs_per_task=%s  max_concurrent_resets=%s",
+        "Starting worker server on %s:%s  max_tasks=%s  max_runs_per_task=%s  max_concurrent_resets=%s  blocked_tasks=%s",
         args.host,
         args.port,
         args.max_tasks,
         args.max_runs_per_task,
         args.max_concurrent_resets,
+        ",".join(sorted(POOL.blocked_task_names)) or "none",
     )
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

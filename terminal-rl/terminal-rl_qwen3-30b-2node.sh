@@ -30,6 +30,7 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "[ERROR] missing cmd: 
 
 export PYTHONUNBUFFERED=1
 export PYTHONFAULTHANDLER=1
+export TERMINAL_RL_BLOCKED_TASKS="${TERMINAL_RL_BLOCKED_TASKS:-205}"
 
 # ─── Topology constants ────────────────────────────────────────────────────────
 NODE_ROLE="${NODE_ROLE:?NODE_ROLE must be 'head' or 'worker'}"
@@ -209,6 +210,7 @@ MISC_ARGS=(
 )
 
 CUSTOM_ARGS=(
+   --data-source-path filtered_data_source.FilteredRolloutDataSourceWithBuffer
    --custom-generate-function-path generate.generate
    --custom-rollout-log-function-path rollout_log.rollout_log
    --custom-config-path "${CUSTOM_CONFIG_PATH}"
@@ -365,6 +367,7 @@ env_vars = {
   "USE_REMOTE_ENV": os.environ.get("USE_REMOTE_ENV","0"),
   "ENV_SERVER_URL": os.environ.get("ENV_SERVER_URL",""),
   "TENSORBOARD_DIR": os.environ.get("TENSORBOARD_DIR",""),
+  "TERMINAL_RL_BLOCKED_TASKS": os.environ.get("TERMINAL_RL_BLOCKED_TASKS","205"),
 }
 print(json.dumps({"env_vars": env_vars}))
 PY

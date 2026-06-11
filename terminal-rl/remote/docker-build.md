@@ -47,12 +47,13 @@ docker buildx build --platform linux/amd64,linux/arm64 -t openclaw-rl:dind --loa
 ```bash
 docker run -d --name openclaw-rl \
   --privileged \
+  --cgroupns private \
   --network host \
-  --ipc host \
+  --memory 256g \
+  --pids-limit 32768 \
   --shm-size 64g \
   -v /data1/ruonan/logs:/logs \
   -v /data1/ruonan/openclaw-dind-data:/var/lib/docker \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
   openclaw-rl:dind \
   tail -f /dev/null
 

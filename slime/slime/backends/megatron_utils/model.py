@@ -9,7 +9,7 @@ from functools import partial
 from pathlib import Path
 
 import torch
-from megatron.core import mpu
+from megatron.core import Timers, mpu
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
 from megatron.core.enums import ModelType
@@ -19,7 +19,7 @@ from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.utils import get_model_config
-from megatron.training.global_vars import get_args, get_timers
+from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
 from slime.utils import logging_utils
@@ -55,19 +55,58 @@ _TRAIN_TIMERS_LEVEL_2 = [
     "backward-send",
 ]
 
+_TRAIN_TIMERS = None
+
 
 def _get_enabled_timers(args: Namespace):
-    return get_timers() if args.timing_log_level > 0 else None
+    global _TRAIN_TIMERS
+
+    if args.timing_log_level == 0:
+        return None
+    if _TRAIN_TIMERS is None:
+        _TRAIN_TIMERS = Timers(args.timing_log_level, args.timing_log_option)
+    return _TRAIN_TIMERS
 
 
-def _log_train_timers(args: Namespace, num_steps: int) -> None:
+def _log_train_timers(args: Namespace, num_steps: int, rollout_id: int = 0) -> None:
+    """Dump Megatron per-phase timers into the captured (rank-0) log stream.
+
+    Megatron's ``Timers.log`` logs to the *last* rank (``world_size - 1``) through
+    Megatron's own module logger. With Ray actor stdout, only rank-0's stream is
+    captured, so that summary never shows up in the run log. Here we instead read
+    rank-0's own timer values directly and emit them through slime's logger (which
+    is captured) plus TB/W&B, and reset every rank so values don't accumulate
+    across rollouts.
+    """
     if args.timing_log_level == 0:
         return
 
     timer_names = list(_TRAIN_TIMERS_LEVEL_1)
     if args.timing_log_level >= 2:
         timer_names.extend(_TRAIN_TIMERS_LEVEL_2)
-    get_timers().log(timer_names, normalizer=max(num_steps, 1), reset=True, barrier=False)
+
+    timers = _get_enabled_timers(args)
+    normalizer = max(num_steps, 1)
+
+    # Read this rank's accumulated time per phase (ms, averaged per train step).
+    dump: dict[str, float] = {}
+    for name in timer_names:
+        timer = timers._timers.get(name)
+        if timer is None:  # phase inactive for this parallel config (e.g. PP=1 recv/send)
+            continue
+        dump[f"timer/{name}_ms"] = timer.elapsed(reset=False) / normalizer * 1000.0
+    # Reset on every rank (local op, no collective) so the next rollout starts clean.
+    for name in timer_names:
+        timer = timers._timers.get(name)
+        if timer is not None:
+            timer.reset()
+
+    if not dump or not (torch.distributed.is_initialized() and torch.distributed.get_rank() == 0):
+        return
+
+    logger.info(f"megatron_timers rollout {rollout_id} (ms/step): {dump}")
+    dump["timer/step"] = rollout_id
+    logging_utils.log(args, dump, step_key="timer/step")
 
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
@@ -738,7 +777,7 @@ def train(
                     abs_tol=0.01,
                 ), f"grad norm mismatch: {grad_norm} != {expected_grad_norm}"
 
-    _log_train_timers(args, num_steps_per_rollout)
+    _log_train_timers(args, num_steps_per_rollout, rollout_id)
 
     # Close out pre-hooks if using distributed optimizer and overlapped param gather.
     if pre_hook_enabled:

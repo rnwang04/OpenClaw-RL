@@ -19,7 +19,7 @@ from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.utils import get_model_config
-from megatron.training.global_vars import get_args
+from megatron.training.global_vars import get_args, get_timers
 from megatron.training.training import get_model
 
 from slime.utils import logging_utils
@@ -31,6 +31,43 @@ from .loss import loss_function
 from .model_provider import get_model_provider_func, wrap_model_provider_with_freeze
 
 logger = logging.getLogger(__name__)
+
+
+_TRAIN_TIMERS_LEVEL_1 = [
+    "forward-backward",
+    "all-grads-sync",
+    "non-tensor-parallel-grads-all-reduce",
+    "embedding-grads-all-reduce",
+    "params-all-gather",
+    "optimizer-copy-to-main-grad",
+    "optimizer-unscale-and-check-inf",
+    "optimizer-clip-main-grad",
+    "optimizer-inner-step",
+    "optimizer-copy-main-to-model-params",
+]
+
+_TRAIN_TIMERS_LEVEL_2 = [
+    "forward-compute",
+    "backward-compute",
+    "forward-recv",
+    "forward-send",
+    "backward-recv",
+    "backward-send",
+]
+
+
+def _get_enabled_timers(args: Namespace):
+    return get_timers() if args.timing_log_level > 0 else None
+
+
+def _log_train_timers(args: Namespace, num_steps: int) -> None:
+    if args.timing_log_level == 0:
+        return
+
+    timer_names = list(_TRAIN_TIMERS_LEVEL_1)
+    if args.timing_log_level >= 2:
+        timer_names.extend(_TRAIN_TIMERS_LEVEL_2)
+    get_timers().log(timer_names, normalizer=max(num_steps, 1), reset=True, barrier=False)
 
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
@@ -115,7 +152,7 @@ def setup_model_and_optimizer(
         if hasattr(args, f.name):
             kwargs[f.name] = getattr(args, f.name)
     config = OptimizerConfig(**kwargs)
-    config.timers = None
+    config.timers = _get_enabled_timers(args)
 
     optimizer = get_megatron_optimizer(
         config=config,
@@ -537,7 +574,7 @@ def train(
     # Setup some training config params.
     config = get_model_config(model[0])
     config.grad_scale_func = optimizer.scale_loss
-    config.timers = None
+    config.timers = _get_enabled_timers(args)
     if isinstance(model[0], DDP) and args.overlap_grad_reduce:
         assert config.no_sync_func is None, (
             "When overlap_grad_reduce is True, config.no_sync_func must be None; "
@@ -700,6 +737,9 @@ def train(
                     rel_tol=0.01,
                     abs_tol=0.01,
                 ), f"grad norm mismatch: {grad_norm} != {expected_grad_norm}"
+
+    _log_train_timers(args, num_steps_per_rollout)
+
     # Close out pre-hooks if using distributed optimizer and overlapped param gather.
     if pre_hook_enabled:
         disable_forward_pre_hook(model)

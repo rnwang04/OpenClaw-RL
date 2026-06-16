@@ -30,6 +30,7 @@ REF_LOAD="${REF_LOAD:-}"
 SAVE_CKPT="${SAVE_CKPT:-}"
 RESUME_LOAD="${RESUME_LOAD:-${SAVE_CKPT}}"
 ROLLOUT_PROMPT_DATA="${ROLLOUT_PROMPT_DATA:-}"
+SAVE_DEBUG_ROLLOUT_DATA="${SAVE_DEBUG_ROLLOUT_DATA:-}"
 
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:2048,expandable_segments:True}"
 export MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
@@ -64,7 +65,7 @@ CKPT_ARGS=(
   --ref-load "${REF_LOAD}"
   --load "${RESUME_LOAD}"
   --save "${SAVE_CKPT}"
-  --save-interval 20
+  --save-interval 10
   --rotary-base 1000000
 )
 
@@ -73,7 +74,7 @@ ROLLOUT_ARGS=(
    --input-key task
    --rollout-shuffle
    --reward-key score
-   --num-rollout 2000
+   --num-rollout 50
    --rollout-batch-size 16
    --n-samples-per-prompt 8
    --rollout-max-response-len 8192
@@ -89,6 +90,19 @@ EVAL_ARGS=(
    --eval-max-response-len 16384
    --eval-top-p 1
 )
+
+DEBUG_ARGS=()
+if [[ -n "${SAVE_DEBUG_ROLLOUT_DATA}" ]]; then
+  if [[ "${SAVE_DEBUG_ROLLOUT_DATA}" != *"{rollout_id}"* ]]; then
+    echo "[ERROR] SAVE_DEBUG_ROLLOUT_DATA must contain {rollout_id}, got: ${SAVE_DEBUG_ROLLOUT_DATA}"
+    exit 1
+  fi
+  mkdir -p "$(dirname "${SAVE_DEBUG_ROLLOUT_DATA}")"
+  DEBUG_ARGS=(
+    --save-debug-rollout-data "${SAVE_DEBUG_ROLLOUT_DATA}"
+  )
+  log "save debug rollout data: ${SAVE_DEBUG_ROLLOUT_DATA}"
+fi
 
 
 PERF_ARGS=(
@@ -309,6 +323,7 @@ submit_job() {
     "${MODEL_ARGS[@]}" \
     "${CKPT_ARGS[@]}" \
     "${ROLLOUT_ARGS[@]}" \
+    "${DEBUG_ARGS[@]}" \
     "${OPTIMIZER_ARGS[@]}" \
     "${GRPO_ARGS[@]}" \
     "${WANDB_ARGS[@]}" \

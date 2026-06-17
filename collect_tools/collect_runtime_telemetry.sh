@@ -147,12 +147,12 @@ while :; do
   fi
 
   awk '
-    /^cpu / {user=$2; system=$4; idle=$5; iowait=$6; steal=$9}
+    /^cpu / {user_ticks=$2; sys_ticks=$4; idle=$5; iowait=$6; steal=$9}
     /^ctxt / {ctxt=$2}
     /^procs_running / {running=$2}
     /^procs_blocked / {blocked=$2}
     END{printf ",%s,%s,%s,%s,%s,%s,%s,%s",
-      user,system,idle,iowait,steal,ctxt,running,blocked}' /proc/stat >> "$HOST_CSV"
+      user_ticks,sys_ticks,idle,iowait,steal,ctxt,running,blocked}' /proc/stat >> "$HOST_CSV"
 
   awk '
     /^pgfault / {pgfault=$2}
@@ -241,7 +241,10 @@ while :; do
         /^Pss_Shmem:/ {shmem=$2}
         /^Locked:/ {locked=$2}
         END{mb=1024.0; printf "%.0f,%.0f,%.0f,%.0f,%.0f",pss/mb,anon/mb,file/mb,shmem/mb,locked/mb}' \
-        "/proc/$pid/smaps_rollup")"
+        "/proc/$pid/smaps_rollup" 2>/dev/null || true)"
+      if [ -z "$smaps_fields" ]; then
+        smaps_fields="0,0,0,0,0"
+      fi
     fi
     IFS=',' read -r rss_mb swap_mb lck_mb pin_mb anon_mb file_mb shmem_mb threads vctx nvctx cpus mems <<<"$status_fields"
     IFS=',' read -r pss_mb pss_anon_mb pss_file_mb pss_shmem_mb locked_mb <<<"$smaps_fields"

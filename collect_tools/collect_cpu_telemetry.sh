@@ -190,7 +190,10 @@ while :; do
         /^Pss_Shmem:/ {shmem=$2}
         /^Locked:/    {locked=$2}
         END{mb=1024.0; printf "%.0f,%.0f,%.0f,%.0f,%.0f",
-          pss/mb,anon/mb,file/mb,shmem/mb,locked/mb}' "/proc/$pid/smaps_rollup")"
+          pss/mb,anon/mb,file/mb,shmem/mb,locked/mb}' "/proc/$pid/smaps_rollup" 2>/dev/null || true)"
+      if [ -z "$smaps_fields" ]; then
+        smaps_fields="0,0,0,0,0"
+      fi
     fi
 
     # Reorder status/smaps fields into the documented CSV schema.

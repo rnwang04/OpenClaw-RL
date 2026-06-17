@@ -616,6 +616,11 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.offload_train:
             self.wake_up()
 
+        if self.role == "actor" and getattr(self.args, "skip_actor_train_for_update_weight_bench", False):
+            if dist.get_rank() == 0:
+                logger.info("Skipping actor train for update_weights benchmark at rollout_id %s", rollout_id)
+            return
+
         with timer("data_preprocess"):
             rollout_data = self._get_rollout_data(rollout_data_ref)
             if self.args.debug_rollout_only:

@@ -1268,6 +1268,16 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--skip-actor-train-for-update-weight-bench",
+                action="store_true",
+                default=False,
+                help=(
+                    "Skip actor backward/optimizer steps while keeping rollout engines "
+                    "and update_weights enabled. Intended only for update_weights "
+                    "latency benchmarks."
+                ),
+            )
+            parser.add_argument(
                 "--save-debug-train-data",
                 type=str,
                 default=None,
@@ -1292,6 +1302,21 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 "--memory-snapshot-num-steps",
                 type=int,
                 default=None,
+            )
+            parser.add_argument(
+                "--dump-save-memory-snapshot",
+                action="store_true",
+                default=False,
+                help=(
+                    "Record allocator history and dump per-rank snapshots immediately before and "
+                    "after checkpoint saves. This can perturb checkpoint timing."
+                ),
+            )
+            parser.add_argument(
+                "--empty-cache-after-save",
+                action="store_true",
+                default=False,
+                help="Run torch.cuda.empty_cache() after checkpoint save as an allocator A/B test.",
             )
             parser.add_argument(
                 "--profile-target",

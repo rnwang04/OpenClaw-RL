@@ -18,6 +18,7 @@ set -x
 #   UPDATE_WEIGHTS_INTERVAL=1
 #   UPDATE_WEIGHT_BENCH_PROMPT_LEN=16
 #   UPDATE_WEIGHT_BENCH_RESPONSE_LEN=8
+#   SKIP_ACTOR_TRAIN_FOR_UPDATE_WEIGHT_BENCH=1
 #   COLLECT_TELEMETRY=1 CLEANUP_PREV=1
 
 log() { echo "[$(date +'%F %T')] $*"; }
@@ -96,6 +97,7 @@ UPDATE_WEIGHT_BUFFER_SIZE="${UPDATE_WEIGHT_BUFFER_SIZE:-536870912}"
 MAX_TOKENS_PER_GPU="${MAX_TOKENS_PER_GPU:-1024}"
 LOG_PROBS_CHUNK_SIZE="${LOG_PROBS_CHUNK_SIZE:-128}"
 SGLANG_MEM_FRACTION_STATIC="${SGLANG_MEM_FRACTION_STATIC:-0.6}"
+SKIP_ACTOR_TRAIN_FOR_UPDATE_WEIGHT_BENCH="${SKIP_ACTOR_TRAIN_FOR_UPDATE_WEIGHT_BENCH:-1}"
 
 export UPDATE_WEIGHT_BENCH_PROMPT_LEN="${UPDATE_WEIGHT_BENCH_PROMPT_LEN:-16}"
 export UPDATE_WEIGHT_BENCH_RESPONSE_LEN="${UPDATE_WEIGHT_BENCH_RESPONSE_LEN:-8}"
@@ -103,6 +105,8 @@ export UPDATE_WEIGHT_BENCH_RESPONSE_LEN="${UPDATE_WEIGHT_BENCH_RESPONSE_LEN:-8}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:2048,expandable_segments:True}"
 export MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 export RAY_TMPDIR="${RAY_TMPDIR:-/tmp/openclaw-rl-ray-update-weight-bench}"
+export RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"
+RAY_ADDRESS="http://127.0.0.1:${RAY_DASHBOARD_PORT}"
 
 # Keep comparable NCCL topology/init logs without logging every collective.
 export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
@@ -119,6 +123,7 @@ exec > >(tee -a "${RUN_LOG}") 2>&1
 log "run_dir=${BENCH_RUN_DIR}"
 log "run_log=${RUN_LOG}"
 log "python=${PYTHON_BIN}"
+log "ray_address=${RAY_ADDRESS}"
 
 cleanup_runtime_monitor() {
   if [[ -n "${RUNTIME_MONITOR_PID:-}" ]]; then
@@ -158,8 +163,47 @@ start_ray_head() {
     --num-gpus "${NUM_GPUS}" \
     --disable-usage-stats \
     --dashboard-host=0.0.0.0 \
-    --dashboard-port="${RAY_DASHBOARD_PORT:-8265}" \
+    --dashboard-port="${RAY_DASHBOARD_PORT}" \
     --temp-dir "${RAY_TMPDIR}"
+}
+
+dump_ray_failure() {
+  local job_id="$1"
+  local diag_dir="${BENCH_RUN_DIR}/ray_failure_${job_id}"
+  mkdir -p "${diag_dir}"
+
+  log "Ray job failed; collecting diagnostics into ${diag_dir}"
+  ray job status "${job_id}" --address="${RAY_ADDRESS}" >"${diag_dir}/ray_job_status.txt" 2>&1 || true
+  ray job logs "${job_id}" --address="${RAY_ADDRESS}" >"${diag_dir}/ray_job_logs.txt" 2>&1 || true
+  ray status --address="${RAY_ADDRESS}" >"${diag_dir}/ray_status.txt" 2>&1 || true
+
+  local session_dir=""
+  session_dir="$(readlink -f "${RAY_TMPDIR}/session_latest" 2>/dev/null || true)"
+  if [[ -z "${session_dir}" && -e "${RAY_TMPDIR}/session_latest" ]]; then
+    session_dir="$("${PYTHON_BIN}" - "${RAY_TMPDIR}/session_latest" <<'PY' 2>/dev/null || true
+import os
+import sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)"
+  fi
+  if [[ -d "${session_dir}/logs" ]]; then
+    echo "${session_dir}" >"${diag_dir}/ray_session_dir.txt"
+    find "${session_dir}/logs" -maxdepth 2 -type f \
+      \( -name "*${job_id}*" -o -name "dashboard*.log" -o -name "raylet.*" -o -name "worker*.err" -o -name "runtime_env*.log" -o -name "python-core-worker*.log" \) \
+      -print >"${diag_dir}/ray_log_files.txt" 2>/dev/null || true
+    while IFS= read -r f; do
+      [[ -f "${f}" ]] || continue
+      local safe_name
+      safe_name="$(echo "${f#${session_dir}/logs/}" | tr '/ ' '__')"
+      tail -n "${RAY_DIAG_TAIL_LINES:-400}" "${f}" >"${diag_dir}/${safe_name}.tail" 2>&1 || true
+    done <"${diag_dir}/ray_log_files.txt"
+  else
+    echo "missing session logs under ${RAY_TMPDIR}/session_latest/logs" >"${diag_dir}/ray_session_missing.txt"
+  fi
+
+  log "Ray diagnostics collected:"
+  find "${diag_dir}" -maxdepth 1 -type f -print | sort || true
 }
 
 build_runtime_env_json() {
@@ -177,11 +221,11 @@ parts = [
     os.environ.get("MEGATRON_DIR", ""),
     os.environ.get("SCRIPT_DIR", ""),
     site_packages,
+    os.environ.get("PYTHONPATH", ""),
 ]
-pythonpath = ":".join([p for p in parts if p])
+pythonpath = os.pathsep.join([p for p in parts if p])
 
 keys = [
-    "PYTHONPATH",
     "CUDA_DEVICE_MAX_CONNECTIONS",
     "NCCL_DEBUG",
     "NCCL_DEBUG_SUBSYS",
@@ -232,6 +276,7 @@ start_collectors() {
     OUTDIR="${BENCH_RUN_DIR}/${HOST}-runtime-update-weight-bench" \
       INTERVAL="${TELEMETRY_INTERVAL:-1}" \
       TOPN="${TELEMETRY_TOPN:-60}" \
+      COLLECT_SMAPS_ROLLUP="${COLLECT_SMAPS_ROLLUP:-0}" \
       TARGET_REGEX="${TARGET_REGEX:-MegatronTrainRayActor|SGLangEngine|sglang|raylet|plasma|gcs_server|python}" \
       bash "${COLLECT_TOOLS_DIR}/collect_runtime_telemetry.sh" &
     RUNTIME_MONITOR_PID=$!
@@ -245,6 +290,8 @@ submit_job() {
   log "submit Ray job"
   local runtime_env_json
   runtime_env_json="$(build_runtime_env_json)"
+  local job_id="${RAY_JOB_ID:-update_weight_bench_${HOST}_${STAMP}}"
+  echo "${job_id}" >"${BENCH_RUN_DIR}/ray_job_id.txt"
 
   CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -273,6 +320,9 @@ submit_job() {
     --update-weights-interval "${UPDATE_WEIGHTS_INTERVAL}"
     --update-weight-buffer-size "${UPDATE_WEIGHT_BUFFER_SIZE}"
   )
+  if [[ "${SKIP_ACTOR_TRAIN_FOR_UPDATE_WEIGHT_BENCH}" == "1" ]]; then
+    ROLLOUT_ARGS+=(--skip-actor-train-for-update-weight-bench)
+  fi
 
   PERF_ARGS=(
     --tensor-model-parallel-size 4
@@ -347,7 +397,15 @@ submit_job() {
     --custom-config-path "${CUSTOM_CONFIG_PATH}"
   )
 
-  ray job submit --address="http://127.0.0.1:${RAY_DASHBOARD_PORT:-8265}" \
+  local wait_args=()
+  if [[ "${RAY_JOB_NO_WAIT:-0}" == "1" ]]; then
+    wait_args+=(--no-wait)
+  fi
+
+  set +e
+  ray job submit --address="${RAY_ADDRESS}" \
+    --submission-id="${job_id}" \
+    "${wait_args[@]}" \
     --runtime-env-json="${runtime_env_json}" \
     -- "${PYTHON_BIN}" "${SLIME_DIR}/train_async.py" \
     --actor-num-nodes 1 \
@@ -364,6 +422,12 @@ submit_job() {
     "${SGLANG_ARGS[@]}" \
     "${MISC_ARGS[@]}" \
     "${CUSTOM_ARGS[@]}"
+  local rc=$?
+  set -e
+  if (( rc != 0 )); then
+    dump_ray_failure "${job_id}"
+    return "${rc}"
+  fi
 }
 
 if [[ "${CLEANUP_PREV:-1}" == "1" ]]; then
